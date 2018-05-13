@@ -42,6 +42,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import org.keycloak.authorization.model.Resource;
+import org.keycloak.authorization.model.Scope;
+import org.keycloak.authorization.store.ResourceStore;
+import org.keycloak.authorization.store.ScopeStore;
 
 /**
  * @author <a href="mailto:psilva@redhat.com">Pedro Igor</a>
@@ -50,11 +54,13 @@ public class PermissionService extends AbstractPermissionService {
 
     private final AuthorizationProvider authorization;
     private final ResourceServer resourceServer;
+    private final KeycloakIdentity identity;
 
     public PermissionService(KeycloakIdentity identity, ResourceServer resourceServer, AuthorizationProvider authorization) {
         super(identity, resourceServer, authorization);
         this.resourceServer = resourceServer;
         this.authorization = authorization;
+        this.identity = identity;
     }
 
     @POST
@@ -67,11 +73,38 @@ public class PermissionService extends AbstractPermissionService {
     @PUT
     @Consumes("application/json")
     public Response update(PermissionTicketRepresentation representation) {
+        PermissionTicketStore ticketStore = authorization.getStoreFactory().getPermissionTicketStore();
         if (representation == null || representation.getId() == null) {
-            throw new ErrorResponseException(OAuthErrorException.INVALID_REQUEST, "invalid_ticket", Response.Status.BAD_REQUEST);
+            if(representation == null || this.identity.isResourceServer() || representation.getOwner() == null || representation.getRequester() == null ) throw new ErrorResponseException(OAuthErrorException.INVALID_REQUEST, "invalid_ticket", Response.Status.BAD_REQUEST);
+            if(this.identity.getId().equals(representation.getOwner())){
+                Scope scope = null;
+                ScopeStore sstore = this.authorization.getStoreFactory().getScopeStore();
+                ResourceStore rstore = this.authorization.getStoreFactory().getResourceStore();
+                if(representation.getScopeName() != null)
+                    scope = sstore.findByName(representation.getScopeName(), resourceServer.getId());
+                else if (representation.getScope() != null)
+                    scope = sstore.findById(representation.getScope(), resourceServer.getId());
+                
+                if (scope == null && representation.getScope() !=null )
+                    throw new ErrorResponseException("invalid_scope", "Scope [" + representation.getScope() + "] is invalid", Response.Status.BAD_REQUEST);
+                if (scope == null && representation.getScopeName() !=null )
+                    throw new ErrorResponseException("invalid_scope", "Scope [" + representation.getScopeName() + "] is invalid", Response.Status.BAD_REQUEST);
+
+                Resource resource = rstore.findById(representation.getResource(), resourceServer.getId());
+                
+                if (resource == null ) throw new ErrorResponseException("invalid_resource_id", "Resource set with id [" + representation.getResource() + "] does not exists in this server.", Response.Status.BAD_REQUEST);
+                
+                boolean match = resource.getScopes().contains(scope);
+
+                if (!match)
+                   throw new ErrorResponseException("invalid_resource_id", "Resource set with id [" + representation.getResource() + "] does not have Scope [" + representation.getScopeName() + "]", Response.Status.BAD_REQUEST);     
+
+                PermissionTicket ticket = ticketStore.create(representation.getResource(), scope.getId(), representation.getRequester(), resourceServer);
+                representation.setId(ticket.getId());
+            }
+            else  throw new ErrorResponseException(OAuthErrorException.INVALID_REQUEST, "only resource owner can directly create a permission", Response.Status.BAD_REQUEST);
         }
 
-        PermissionTicketStore ticketStore = authorization.getStoreFactory().getPermissionTicketStore();
         PermissionTicket ticket = ticketStore.findById(representation.getId(), resourceServer.getId());
 
         if (ticket == null) {
