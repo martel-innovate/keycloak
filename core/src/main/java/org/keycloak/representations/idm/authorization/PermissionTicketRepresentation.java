@@ -28,8 +28,9 @@ public class PermissionTicketRepresentation {
     private boolean granted;
     private String scopeName;
     private String resourceName;
+    private String requester; 
+    private String ownerName;
     private String requesterName;
-    private String requester;
 
     public String getId() {
         return id;
@@ -101,5 +102,13 @@ public class PermissionTicketRepresentation {
 
     public String getRequester() {
         return requester;
+    }
+    
+    public void setOwnerName(String ownerName) {
+        this.ownerName = ownerName;
+    }
+
+    public String getOwnerName() {
+        return ownerName;
     }
 }
